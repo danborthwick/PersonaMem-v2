@@ -102,27 +102,23 @@ class PersonaAdapter:
         Returns:
             The assistant's response
         """
-        # Create a script that feeds messages to the CLI
-        script_lines = []
+        # Create stdin input lines for the CLI
+        lines = []
 
         # Switch to the user
-        script_lines.append(f"/user {user_id}")
+        lines.append(f"/user {user_id}")
 
-        # Send history as JSON to be processed
-        if history:
-            history_json = json.dumps(history)
-            # Escape for shell
-            escaped_history = history_json.replace('"', '\\"')
-            script_lines.append(f"/history {escaped_history}")
+        # Add history messages (each as separate lines, not as /history command)
+        for msg in history:
+            lines.append(json.dumps(msg))
 
         # Send the final message
-        escaped_final = final_message.replace('"', '\\"').replace('\n', '\\n')
-        script_lines.append(escaped_final)
+        lines.append(final_message)
 
         # Create temporary input file
         with tempfile.NamedTemporaryFile(mode='w', suffix='.txt', delete=False) as f:
             input_file = f.name
-            f.write('\n'.join(script_lines))
+            f.write('\n'.join(lines))
 
         try:
             # Run the Persona CLI
