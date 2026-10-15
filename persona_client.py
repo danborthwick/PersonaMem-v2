@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
-Adapter to make the Persona CLI app compatible with PersonaMem-v2 benchmark.
-This module provides a QueryLLM-compatible interface for the Persona chatbot.
+Persona client that mimics the Anthropic client API.
+Provides a messages.create() interface compatible with query_llm.py usage patterns.
 """
 
 import hashlib
@@ -12,22 +12,24 @@ import tempfile
 from typing import Any, Dict, List
 
 
-class PersonaAdapter:
-    """Adapter to query the Persona CLI app in a benchmark-compatible way."""
+class PersonaResponse:
+    """Response object that mimics Anthropic's response structure."""
 
-    def __init__(self, args: Dict[str, Any]):
-        """
-        Initialize the Persona adapter.
+    def __init__(self, text: str):
+        self.content = [type('Content', (), {'text': text})()]
+        self.usage = type('Usage', (), {
+            'input_tokens': 0,
+            'cache_read_input_tokens': 0,
+            'cache_creation_input_tokens': 0
+        })()
 
-        Args:
-            args: Configuration dict (compatible with PersonaMem-v2 format)
-        """
-        self.args = args
-        # Absolute path to the Persona project
-        self.project_root = "/Users/danborthwick/Developer/AI/Persona"
-        self.verbose = args.get('verbose', False)
 
-        # Check that the Persona app is built
+class PersonaMessages:
+    """Messages API that mimics Anthropic's messages interface."""
+
+    def __init__(self, project_root: str, verbose: bool = False):
+        self.project_root = project_root
+        self.verbose = verbose
         self._verify_build()
 
     def _verify_build(self):
@@ -38,57 +40,57 @@ class PersonaAdapter:
                 f"Persona app not built. Run 'yarn build' in {self.project_root}"
             )
 
-    def query_llm(self, messages: List[Dict[str, str]], use_history: bool = True) -> str:
+    def create(self, model: str, max_tokens: int, messages: List[Dict[str, Any]]) -> PersonaResponse:
         """
-        Query the Persona chatbot with a conversation history.
-
-        This method simulates a conversation by:
-        1. Creating a temporary user ID
-        2. Replaying the conversation history
-        3. Getting the final response
+        Create a message completion (mimics anthropic.messages.create).
 
         Args:
+            model: Model name (ignored, Persona uses its own model)
+            max_tokens: Max tokens (ignored, Persona uses its own limits)
             messages: List of message dicts with 'role' and 'content'
-            use_history: Whether to use conversation history (always True for Persona)
 
         Returns:
-            The assistant's response to the last user message
+            PersonaResponse object with text content
         """
-        if not messages:
-            return ""
-
-        # Extract the conversation turns (ignore system messages for now)
+        # Filter out system messages and extract conversation
         conversation_messages = []
         for msg in messages:
             role = msg.get('role', '')
-            content = msg.get('content', '')
+            content_raw = msg.get('content', '')
 
-            # Skip system messages - they'll be handled via Jev personality analysis
+            # Extract text from content (handle both string and list formats)
+            if isinstance(content_raw, str):
+                content = content_raw
+            elif isinstance(content_raw, list):
+                # Extract text from structured content (handle cache_control format)
+                text_parts = []
+                for item in content_raw:
+                    if isinstance(item, dict) and item.get('type') == 'text':
+                        text_parts.append(item.get('text', ''))
+                content = ' '.join(text_parts)
+            else:
+                content = ''
+
+            # Skip system messages (handled via Jev personality analysis)
             if role == 'system':
                 continue
 
-            if role in ('user', 'assistant'):
+            if role in ('user', 'assistant') and content:
                 conversation_messages.append({'role': role, 'content': content})
 
         if not conversation_messages:
-            return ""
+            return PersonaResponse("")
 
-        # Get the final user message
+        # Get final message and history
         final_message = conversation_messages[-1]['content']
-
-        # Build conversation history (all messages except the last one)
         history = conversation_messages[:-1] if len(conversation_messages) > 1 else []
 
-        # Create a unique user ID for this evaluation
+        # Create unique user ID for this conversation
         user_id = hashlib.md5(str(messages).encode()).hexdigest()[:12]
 
-        try:
-            # Run the Persona CLI in non-interactive mode
-            response = self._run_persona_chat(user_id, history, final_message)
-            return response
-        except Exception as e:
-            print(f"Error querying Persona: {e}")
-            raise
+        # Run Persona chat
+        response_text = self._run_persona_chat(user_id, history, final_message)
+        return PersonaResponse(response_text)
 
     def _run_persona_chat(self, user_id: str, history: List[Dict[str, str]], final_message: str) -> str:
         """
@@ -96,23 +98,20 @@ class PersonaAdapter:
 
         Args:
             user_id: Unique identifier for this conversation
-            history: Previous messages in the conversation (dicts with 'role' and 'content')
+            history: Previous messages in the conversation
             final_message: The final message to respond to
 
         Returns:
             The assistant's response
         """
-        # Create stdin input lines for the CLI
-        lines = []
+        # Create stdin input lines
+        lines = [f"/user {user_id}"]
 
-        # Switch to the user
-        lines.append(f"/user {user_id}")
-
-        # Add history messages (each as separate lines, not as /history command)
+        # Add history messages
         for msg in history:
             lines.append(json.dumps(msg))
 
-        # Send the final message
+        # Add final message
         lines.append(final_message)
 
         # Create temporary input file
@@ -121,9 +120,8 @@ class PersonaAdapter:
             f.write('\n'.join(lines))
 
         try:
-            # Run the Persona CLI
+            # Run Persona CLI
             env = os.environ.copy()
-            # Disable debug mode for cleaner output during benchmark
             env['DEBUG'] = 'false'
             env['LOG_LEVEL'] = 'error'
 
@@ -134,56 +132,58 @@ class PersonaAdapter:
                 capture_output=True,
                 text=True,
                 env=env,
-                timeout=600  # Timeout per query
+                timeout=600
             )
 
             if result.returncode != 0:
                 raise RuntimeError(f"Persona CLI failed: {result.stderr}")
 
-            # Parse the output to extract the final assistant response
-            response = self._extract_final_response(result.stdout)
-            return response
+            # Extract final response from output
+            return self._extract_final_response(result.stdout)
 
         finally:
-            # Clean up temp file
             os.unlink(input_file)
 
     def _extract_final_response(self, cli_output: str) -> str:
         """
         Extract the final assistant response from CLI output.
 
-        The CLI outputs lines like:
-        You: <message>
-        Assistant: <response>
-
-        We need to extract the last Assistant response.
-
         Args:
-            cli_output: The raw output from the CLI
+            cli_output: Raw output from the CLI
 
         Returns:
             The last assistant response
         """
         lines = cli_output.split('\n')
-
-        # Find all "Assistant:" lines
         assistant_responses = []
+
         for line in lines:
             if line.strip().startswith('Assistant:'):
-                # Extract everything after "Assistant: "
                 response = line.strip()[len('Assistant:'):].strip()
                 if response:
                     assistant_responses.append(response)
 
         if not assistant_responses:
-            # Fallback: return empty or raise error
             if self.verbose:
                 print(f"Warning: No assistant response found in output:\n{cli_output}")
             return ""
 
-        # Return the last response
         return assistant_responses[-1]
 
+
+class PersonaClient:
+    """Client that mimics the Anthropic client API."""
+
+    def __init__(self, project_root: str = "/Users/danborthwick/Developer/AI/Persona", verbose: bool = False):
+        """
+        Initialize the Persona client.
+
+        Args:
+            project_root: Absolute path to the Persona project
+            verbose: Enable verbose logging
+        """
+        self.messages = PersonaMessages(project_root, verbose)
+
     def cleanup_caches(self):
-        """No-op for Persona adapter (included for compatibility)."""
+        """No-op for compatibility with QueryLLM interface."""
         pass

@@ -23,7 +23,6 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from threading import Lock
 
 from query_llm import QueryLLM
-from persona_adapter import PersonaAdapter
 from inference_utils import (
     evaluate_narrow_judge,
     evaluate_broad_judge
@@ -40,11 +39,8 @@ class PersonaBenchmarkEvaluator:
         if model_name and model_name in self._map_model_name(model_name):
             self.config['models']['llm_model'] = self._map_model_name(model_name)
 
-        # Use PersonaAdapter if model is 'persona', otherwise use QueryLLM
-        if model_name == 'persona' or self.config['models']['llm_model'] == 'persona':
-            self.query_llm = PersonaAdapter(self.config)
-        else:
-            self.query_llm = QueryLLM(self.config)
+        # Use QueryLLM for all models (including Persona)
+        self.query_llm = QueryLLM(self.config)
 
         self.results_dir = Path(result_path)
         self.results_dir.mkdir(parents=True, exist_ok=True)

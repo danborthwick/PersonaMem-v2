@@ -34,6 +34,14 @@ except ImportError:
     CLAUDE_AVAILABLE = False
     print("Warning: anthropic not installed. Claude models will not be available.")
 
+# Import Persona client
+try:
+    from persona_client import PersonaClient
+    PERSONA_AVAILABLE = True
+except ImportError:
+    PERSONA_AVAILABLE = False
+    print("Warning: persona_client not available. Persona models will not be available.")
+
 
 class QueryLLM:
     def __init__(self, args, rate_limit_per_min=50):
@@ -53,9 +61,23 @@ class QueryLLM:
 
 
     def _setup_client(self):
-        """Setup OpenAI, Azure OpenAI, Gemini, or Claude client based on environment variables."""
+        """Setup OpenAI, Azure OpenAI, Gemini, Claude, or Persona client based on environment variables."""
         model_name = self.args['models']['llm_model']
-        
+
+        # Check if this is a Persona model
+        if re.search(r'persona', model_name, re.IGNORECASE):
+            if not PERSONA_AVAILABLE:
+                raise ValueError("persona_client is not available. Please check persona_client.py")
+
+            print(f"Using Persona configuration for model: {model_name}")
+            persona_root = os.getenv("PERSONA_ROOT") or "/Users/danborthwick/Developer/AI/Persona"
+            self.client = PersonaClient(project_root=persona_root, verbose=self.args.get('verbose', False))
+            self.model = model_name
+            self.is_gemini = False
+            self.is_claude = False
+            self.is_persona = True
+            return
+
         # Check if this is a Gemini model
         if re.search(r'gemini', model_name, re.IGNORECASE):
             if not GEMINI_AVAILABLE:
@@ -75,6 +97,7 @@ class QueryLLM:
                 self.model = model_name
             self.is_gemini = True
             self.is_claude = False
+            self.is_persona = False
             return
         
         # Check if this is a Claude model
@@ -91,11 +114,13 @@ class QueryLLM:
             self.model = model_name
             self.is_gemini = False
             self.is_claude = True
+            self.is_persona = False
             return
         
         # Original OpenAI/Azure setup
         self.is_gemini = False
         self.is_claude = False
+        self.is_persona = False
         
         # Check for Azure OpenAI configuration first
         azure_endpoint = os.getenv("AZURE_OPENAI_ENDPOINT")
@@ -409,6 +434,37 @@ class QueryLLM:
                 content = response.content[0].text
             except Exception as e:
                 print(utils.Colors.WARNING + f'Error getting Claude response: {e}' + utils.Colors.ENDC)
+                content = None
+        elif self.is_persona:
+            # Call Persona API using the same pattern as Claude
+            try:
+                # Persona client uses the same messages format as Claude
+                persona_messages = []
+                for msg in messages:
+                    role = msg.get('role')
+                    content_text = msg.get('content', '')
+
+                    # Handle content that might be a list (for multimodal messages)
+                    if isinstance(content_text, list):
+                        text_parts = [item.get("text", "") for item in content_text if item.get("type") == "text"]
+                        content_text = " ".join(text_parts)
+
+                    # Only keep user and assistant messages (system messages filtered in persona_client)
+                    if role in ['user', 'assistant', 'system'] and content_text:
+                        persona_messages.append({
+                            'role': role,
+                            'content': content_text
+                        })
+
+                response = self.client.messages.create(
+                    model=self.model,
+                    max_tokens=4096,
+                    messages=persona_messages
+                )
+
+                content = response.content[0].text
+            except Exception as e:
+                print(utils.Colors.WARNING + f'Error getting Persona response: {e}' + utils.Colors.ENDC)
                 content = None
         else:
             # Call OpenAI/Azure OpenAI Chat Completions API
