@@ -47,43 +47,19 @@ class PersonaMessages:
         Args:
             model: Model name (ignored, Persona uses its own model)
             max_tokens: Max tokens (ignored, Persona uses its own limits)
-            messages: List of message dicts with 'role' and 'content'
+            messages: List of message dicts with 'role' and 'content' (pre-processed by query_llm.py)
+                     Content is already extracted as strings, system messages already removed
 
         Returns:
             PersonaResponse object with text content
         """
-        # Filter out system messages and extract conversation
-        conversation_messages = []
-        for msg in messages:
-            role = msg.get('role', '')
-            content_raw = msg.get('content', '')
-
-            # Extract text from content (handle both string and list formats)
-            if isinstance(content_raw, str):
-                content = content_raw
-            elif isinstance(content_raw, list):
-                # Extract text from structured content (handle cache_control format)
-                text_parts = []
-                for item in content_raw:
-                    if isinstance(item, dict) and item.get('type') == 'text':
-                        text_parts.append(item.get('text', ''))
-                content = ' '.join(text_parts)
-            else:
-                content = ''
-
-            # Skip system messages (handled via Jev personality analysis)
-            if role == 'system':
-                continue
-
-            if role in ('user', 'assistant') and content:
-                conversation_messages.append({'role': role, 'content': content})
-
-        if not conversation_messages:
+        if not messages:
             return PersonaResponse("")
 
+        # Messages are already processed by query_llm.py (same as Claude processing)
         # Get final message and history
-        final_message = conversation_messages[-1]['content']
-        history = conversation_messages[:-1] if len(conversation_messages) > 1 else []
+        final_message = messages[-1]['content']
+        history = messages[:-1] if len(messages) > 1 else []
 
         # Create unique user ID for this conversation
         user_id = hashlib.md5(str(messages).encode()).hexdigest()[:12]
@@ -147,28 +123,24 @@ class PersonaMessages:
     def _extract_final_response(self, cli_output: str) -> str:
         """
         Extract the final assistant response from CLI output.
+        Finds the last occurrence of "Assistant:" and returns everything after it.
 
         Args:
             cli_output: Raw output from the CLI
 
         Returns:
-            The last assistant response
+            The last assistant response (may be multi-line)
         """
-        lines = cli_output.split('\n')
-        assistant_responses = []
+        # Find the last occurrence of "Assistant:"
+        last_idx = cli_output.rfind('Assistant:')
 
-        for line in lines:
-            if line.strip().startswith('Assistant:'):
-                response = line.strip()[len('Assistant:'):].strip()
-                if response:
-                    assistant_responses.append(response)
-
-        if not assistant_responses:
+        if last_idx == -1:
             if self.verbose:
                 print(f"Warning: No assistant response found in output:\n{cli_output}")
             return ""
 
-        return assistant_responses[-1]
+        # Return everything after "Assistant:", stripped of leading/trailing whitespace
+        return cli_output[last_idx + len('Assistant:'):].strip()
 
 
 class PersonaClient:

@@ -438,7 +438,8 @@ class QueryLLM:
         elif self.is_persona:
             # Call Persona API using the same pattern as Claude
             try:
-                # Persona client uses the same messages format as Claude
+                # Use the same message processing as Claude
+                # Convert all messages to user/assistant format (Persona doesn't use 'system' role)
                 persona_messages = []
                 for msg in messages:
                     role = msg.get('role')
@@ -449,8 +450,12 @@ class QueryLLM:
                         text_parts = [item.get("text", "") for item in content_text if item.get("type") == "text"]
                         content_text = " ".join(text_parts)
 
-                    # Only keep user and assistant messages (system messages filtered in persona_client)
-                    if role in ['user', 'assistant', 'system'] and content_text:
+                    # Convert system messages to user messages for Persona
+                    if role == 'system':
+                        role = 'user'
+
+                    # Only keep user and assistant messages
+                    if role in ['user', 'assistant'] and content_text:
                         persona_messages.append({
                             'role': role,
                             'content': content_text
