@@ -1,7 +1,7 @@
 #!/bin/bash
 set -e
 
-MODEL_NAME="claude-sonnet-4-6-20250514"
+MODEL_NAME="claude-sonnet-4-6"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 
@@ -13,12 +13,12 @@ echo "Project root: ${PROJECT_ROOT}"
 # Default arguments
 DEFAULT_ARGS=(
     --model_name "${MODEL_NAME}"
-    --benchmark_file data/benchmark/multimodal/benchmark.csv
+    --benchmark_file data/benchmark/text/benchmark.csv
     --eval_mode both
-    --use_multimodal
-    --result_path "results/multimodal/${MODEL_NAME}"
-    --size both
-    --max_items 1000
+    # --use_multimodal
+    --result_path "results/text/${MODEL_NAME}"
+    --size 32k
+    --max_items 10
     --parallel 1
 )
 

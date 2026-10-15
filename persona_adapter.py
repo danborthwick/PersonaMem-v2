@@ -4,11 +4,11 @@ Adapter to make the Persona CLI app compatible with PersonaMem-v2 benchmark.
 This module provides a QueryLLM-compatible interface for the Persona chatbot.
 """
 
+import hashlib
 import json
 import os
 import subprocess
 import tempfile
-import hashlib
 from typing import Any, Dict, List
 
 
@@ -128,7 +128,7 @@ class PersonaAdapter:
             env['LOG_LEVEL'] = 'error'
 
             result = subprocess.run(
-                ['node', 'dist/src/index.js'],
+                ['node', 'dist/src/index.js', '--passthrough'],
                 cwd=self.project_root,
                 stdin=open(input_file, 'r'),
                 capture_output=True,

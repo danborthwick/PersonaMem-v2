@@ -16,8 +16,8 @@ DEFAULT_ARGS=(
     --benchmark_file data/benchmark/text/benchmark.csv
     --eval_mode both
     --result_path "results/text/${MODEL_NAME}"
-    --size both
-    --max_items 1
+    --size 32k
+    --max_items 10
     --parallel 1
 )
 
